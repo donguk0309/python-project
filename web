@@ -1,0 +1,213 @@
+import sys
+import numpy as np
+from PyQt5.QtWidgets import (
+    QApplication, QMainWindow, QLineEdit, QToolBar, QAction, QMessageBox, QTextEdit, QVBoxLayout, QWidget, QPushButton, QFileDialog
+)
+from PyQt5.QtWebEngineWidgets import QWebEngineView, QWebEnginePage
+from PyQt5.QtCore import QUrl
+
+
+class QuantumPageState:
+    def __init__(self, states):
+        total_prob = sum(abs(a)**2 for a in states.values())
+        if not np.isclose(total_prob, 1):
+            raise ValueError("진폭 제곱합이 1이어야 합니다.")
+        self.states = states
+
+    def measure(self):
+        keys = list(self.states.keys())
+        probs = [abs(a)**2 for a in self.states.values()]
+        chosen_state = np.random.choice(keys, p=probs)
+        self.states = {k: (1+0j if k == chosen_state else 0+0j) for k in keys}
+        return chosen_state
+
+    def __str__(self):
+        return " | ".join(f"{k}: {a:.4f}" for k, a in self.states.items())
+
+
+class DevToolsWindow(QMainWindow):
+    def __init__(self, inspected_page):
+        super().__init__()
+        self.setWindowTitle("개발자 도구 (DevTools)")
+        self.setGeometry(150, 150, 900, 700)
+
+        self.devtools = QWebEngineView(self)
+        self.setCentralWidget(self.devtools)
+        self.devtools_page = QWebEnginePage()
+        self.devtools.setPage(self.devtools_page)
+        self.devtools_page.setInspectedPage(inspected_page)
+
+
+class SourceCodeWindow(QMainWindow):
+    def __init__(self, html_source):
+        super().__init__()
+        self.setWindowTitle("페이지 소스 보기")
+        self.setGeometry(200, 200, 800, 600)
+
+        self.text_edit = QTextEdit()
+        self.text_edit.setPlainText(html_source)
+        self.text_edit.setReadOnly(True)
+
+        self.setCentralWidget(self.text_edit)
+
+
+class QuantumBrowser(QMainWindow):
+    def __init__(self, home_url="https://www.google.com"):
+        super().__init__()
+        self.setWindowTitle("Quantum Web Browser + DevTools")
+        self.setGeometry(100, 100, 1200, 900)
+
+        self.home_url = home_url
+
+        navtb = QToolBar()
+        self.addToolBar(navtb)
+
+        self.urlbar = QLineEdit()
+        self.urlbar.returnPressed.connect(self.navigate_to_url)
+        navtb.addWidget(self.urlbar)
+
+        back_btn = QAction("←", self)
+        back_btn.triggered.connect(self.go_back)
+        navtb.addAction(back_btn)
+
+        forward_btn = QAction("→", self)
+        forward_btn.triggered.connect(self.go_forward)
+        navtb.addAction(forward_btn)
+
+        reload_btn = QAction("⟳", self)
+        reload_btn.triggered.connect(self.reload_page)
+        navtb.addAction(reload_btn)
+
+        home_btn = QAction("🏠", self)
+        home_btn.triggered.connect(self.go_home)
+        navtb.addAction(home_btn)
+
+        newwin_btn = QAction("새창", self)
+        newwin_btn.triggered.connect(self.open_new_window)
+        navtb.addAction(newwin_btn)
+
+        devtools_btn = QAction("개발자 도구", self)
+        devtools_btn.triggered.connect(self.open_dev_tools)
+        navtb.addAction(devtools_btn)
+
+        source_btn = QAction("페이지 소스", self)
+        source_btn.triggered.connect(self.view_page_source)
+        navtb.addAction(source_btn)
+
+        screenshot_btn = QAction("스크린샷", self)
+        screenshot_btn.triggered.connect(self.take_screenshot)
+        navtb.addAction(screenshot_btn)
+
+        exit_btn = QAction("종료", self)
+        exit_btn.triggered.connect(self.close)
+        navtb.addAction(exit_btn)
+
+        self.browser = QWebEngineView()
+        self.setCentralWidget(self.browser)
+        self.browser.urlChanged.connect(self.update_urlbar)
+        self.browser.loadFinished.connect(self.on_load_finished)
+
+        self.reset_quantum_state()
+        self.browser.load(QUrl(self.home_url))
+
+    def reset_quantum_state(self):
+        self.quantum_state = QuantumPageState({
+            "loading": 1/np.sqrt(3) + 0j,
+            "rendered": 1/np.sqrt(3) + 0j,
+            "error": 1/np.sqrt(3) + 0j,
+        })
+
+    def navigate_to_url(self):
+        url = self.urlbar.text()
+        if not url.startswith("http"):
+            url = "http://" + url
+        self.browser.load(QUrl(url))
+        self.quantum_state = QuantumPageState({
+            "loading": 1 + 0j,
+            "rendered": 0 + 0j,
+            "error": 0 + 0j,
+        })
+        print("\n페이지 로딩 시작, 양자 상태 초기화:")
+        print(self.quantum_state)
+
+    def update_urlbar(self, q):
+        self.urlbar.setText(q.toString())
+
+    def go_back(self):
+        self.browser.back()
+
+    def go_forward(self):
+        self.browser.forward()
+
+    def reload_page(self):
+        self.browser.reload()
+
+    def go_home(self):
+        self.browser.load(QUrl(self.home_url))
+        self.reset_quantum_state()
+        print("\n홈으로 이동, 양자 상태 초기화:")
+        print(self.quantum_state)
+
+    def open_new_window(self):
+        self.new_window = QuantumBrowser(self.home_url)
+        self.new_window.show()
+        print("\n새 창 열림")
+
+    def open_dev_tools(self):
+        if hasattr(self, "devtools_window") and self.devtools_window.isVisible():
+            self.devtools_window.activateWindow()
+            return
+        self.devtools_window = DevToolsWindow(self.browser.page())
+        self.devtools_window.show()
+        print("\n개발자 도구 열림")
+
+    def view_page_source(self):
+        def callback(html):
+            self.source_window = SourceCodeWindow(html)
+            self.source_window.show()
+        self.browser.page().toHtml(callback)
+        print("\n페이지 소스 보기 실행")
+
+    def take_screenshot(self):
+        def callback(img):
+            filename, _ = QFileDialog.getSaveFileName(self, "스크린샷 저장", "", "PNG Files (*.png)")
+            if filename:
+                img.save(filename)
+                print(f"\n스크린샷 저장됨: {filename}")
+        self.browser.grab().then(callback)
+
+    def on_load_finished(self, ok):
+        if ok:
+            self.quantum_state = QuantumPageState({
+                "loading": 0 + 0j,
+                "rendered": 1 + 0j,
+                "error": 0 + 0j,
+            })
+        else:
+            self.quantum_state = QuantumPageState({
+                "loading": 0 + 0j,
+                "rendered": 0 + 0j,
+                "error": 1 + 0j,
+            })
+        collapsed = self.quantum_state.measure()
+        print("\n페이지 로딩 완료, 측정 후 상태 (collapse):", collapsed)
+        print("측정 후 양자 상태:")
+        print(self.quantum_state)
+
+    def closeEvent(self, event):
+        reply = QMessageBox.question(
+            self, '종료 확인',
+            "정말 브라우저를 종료하시겠습니까?",
+            QMessageBox.Yes | QMessageBox.No, QMessageBox.No
+        )
+        if reply == QMessageBox.Yes:
+            event.accept()
+        else:
+            event.ignore()
+
+
+if __name__ == "__main__":
+    app = QApplication(sys.argv)
+    window = QuantumBrowser()
+    window.show()
+    sys.exit(app.exec_())
