@@ -1,0 +1,17 @@
+import numpy as np
+
+def normalization_constant(n):
+    # 1^2 + 2^2 + ... + n^2 = n(n+1)(2n+1)/6
+    return np.sqrt(n * (n + 1) * (2 * n + 1) / 6)
+
+def quantum_amplitude(i, norm):
+    return i / norm  # 정규화된 진폭
+
+# 1~1,000,000
+N = 1_000_000
+norm = normalization_constant(N)
+
+# 예: 1번째, 500000번째, 1000000번째 진폭
+print("첫 번째 진폭:", quantum_amplitude(1, norm))
+print("중간 진폭:", quantum_amplitude(N//2, norm))
+print("마지막 진폭:", quantum_amplitude(N, norm) 
