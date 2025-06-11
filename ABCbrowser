@@ -1,0 +1,114 @@
+import sys
+import numpy as np
+from PyQt5.QtWidgets import (
+    QApplication, QMainWindow, QLineEdit, QToolBar, QAction, QMessageBox
+)
+from PyQt5.QtWebEngineWidgets import QWebEngineView
+from PyQt5.QtCore import QUrl, Qt
+
+# 위기법 진폭 최적화 클래스 (기존과 동일)
+class AmplitudeNormalizer:
+    def __init__(self, total_nodes):
+        self.total = total_nodes
+        self.norm = np.sqrt(self.total * (self.total + 1) * (2 * self.total + 1) / 6)
+
+    def amplitude(self, i):
+        return i / self.norm
+
+# 메인 브라우저 클래스
+class QuantumBrowser(QMainWindow):
+    # 창 목록 저장용 (클래스 변수)
+    windows = []
+
+    def __init__(self):
+        super().__init__()
+        self.setWindowTitle("ABC BROWSER")
+        self.setGeometry(50, 50, 1280, 900)
+
+        self.navtb = QToolBar()
+        self.addToolBar(self.navtb)
+
+        self.urlbar = QLineEdit()
+        self.urlbar.returnPressed.connect(self.navigate_to_url)
+        self.navtb.addWidget(self.urlbar)
+
+        back_btn = QAction("←", self)
+        back_btn.triggered.connect(self.go_back)
+        self.navtb.addAction(back_btn)
+
+        forward_btn = QAction("→", self)
+        forward_btn.triggered.connect(self.go_forward)
+        self.navtb.addAction(forward_btn)
+
+        reload_btn = QAction("⟳", self)
+        reload_btn.triggered.connect(self.reload_page)
+        self.navtb.addAction(reload_btn)
+
+        # 새 창 열기 버튼 추가
+        new_window_btn = QAction("새 창", self)
+        new_window_btn.triggered.connect(self.open_new_window)
+        self.navtb.addAction(new_window_btn)
+
+        self.browser = QWebEngineView()
+        self.setCentralWidget(self.browser)
+        self.browser.urlChanged.connect(self.update_urlbar)
+        self.browser.loadFinished.connect(self.apply_quantum_optimization)
+
+        self.browser.load(QUrl("https://www.google.com"))
+
+        # 현재 창을 windows 리스트에 추가
+        QuantumBrowser.windows.append(self)
+
+    def navigate_to_url(self):
+        url = self.urlbar.text()
+        if not url.startswith("http"):
+            url = "http://" + url
+        self.browser.load(QUrl(url))
+
+    def update_urlbar(self, q):
+        self.urlbar.setText(q.toString())
+
+    def go_back(self):
+        self.browser.back()
+
+    def go_forward(self):
+        self.browser.forward()
+
+    def reload_page(self):
+        self.browser.reload()
+
+    def apply_quantum_optimization(self):
+        js_get_nodes = """
+            (function(){
+                return document.getElementsByTagName('*').length;
+            })();
+        """
+
+        def on_get_nodes(num_nodes):
+            if num_nodes is None:
+                print("DOM 노드 개수 불러오기 실패")
+                return
+
+            print(f"페이지 노드 수: {num_nodes}")
+            normalizer = AmplitudeNormalizer(num_nodes)
+
+            print("--- Quantum Amplitudes (상위 30개) ---")
+            for i in range(1, min(31, num_nodes + 1)):
+                amp = normalizer.amplitude(i)
+                print(f"Node {i}: Amplitude {amp:.8f}")
+
+        self.browser.page().runJavaScript(js_get_nodes, on_get_nodes)
+
+    def open_new_window(self):
+        # 새 브라우저 창 생성 및 표시
+        new_win = QuantumBrowser()
+        new_win.show()
+
+# 실행부
+if __name__ == '__main__':
+    app = QApplication(sys.argv)
+
+    main_window = QuantumBrowser()
+    main_window.show()
+
+    sys.exit(app.exec_())
