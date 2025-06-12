@@ -1,0 +1,177 @@
+import threading
+import time
+import hashlib
+import random
+import json
+from flask import Flask, request
+
+# --- 진폭 주소 (128bit hex) 생성 함수 ---
+def amplitude_address(data_str):
+    # SHA256 해시 후 앞 128bit(16바이트) 반환
+    h = hashlib.sha256(data_str.encode()).digest()
+    return h[:16]  # bytes
+
+def bytes_to_hex(b):
+    return b.hex()
+
+def hex_to_bytes(h):
+    return bytes.fromhex(h)
+
+def xor_distance(a, b):
+    # a, b는 bytes (16bytes)
+    return int.from_bytes(bytes(x ^ y for x, y in zip(a, b)), 'big')
+
+# --- 노드 클래스 ---
+class Node:
+    K = 5  # 복제 노드 수 (replication factor)
+    def __init__(self, node_id_bytes):
+        self.node_id = node_id_bytes  # 16바이트
+        self.node_id_hex = bytes_to_hex(node_id_bytes)
+        self.routing_table = set()    # 알게된 다른 노드들 (Node ID hex 문자열 집합)
+        self.data_store = {}          # 진폭주소(hex) → (page_id, html)
+        self.lock = threading.Lock()
+        print(f"[Node {self.node_id_hex[:8]}] 생성됨")
+
+    def add_peer(self, peer_id_hex):
+        with self.lock:
+            if peer_id_hex != self.node_id_hex:
+                self.routing_table.add(peer_id_hex)
+
+    def store_data(self, amp_addr_hex, page_id, html):
+        with self.lock:
+            self.data_store[amp_addr_hex] = (page_id, html)
+            # 저장 후 자신 라우팅 테이블에 추가 (자기 자신은 아님)
+            # 복제 대상은 라우팅 테이블에서 가장 가까운 K개 노드에 전파 필요
+        print(f"[Node {self.node_id_hex[:8]}] 데이터 저장: {page_id} @ {amp_addr_hex[:8]}")
+
+    def find_closest_nodes(self, target_hex, max_nodes=K):
+        with self.lock:
+            all_nodes = list(self.routing_table) + [self.node_id_hex]
+        all_nodes.sort(key=lambda n: xor_distance(hex_to_bytes(n), hex_to_bytes(target_hex)))
+        return all_nodes[:max_nodes]
+
+    def get_data(self, amp_addr_hex):
+        with self.lock:
+            return self.data_store.get(amp_addr_hex, None)
+
+    def replicate_to_peers(self):
+        # 자신 저장 데이터 중 가까운 노드들에게 복제 (네트워크 전파)
+        with self.lock:
+            keys = list(self.data_store.keys())
+            peers = list(self.routing_table)
+        for key in keys:
+            closest = self.find_closest_nodes(key, self.K)
+            for node_hex in closest:
+                if node_hex != self.node_id_hex:
+                    # 네트워크 메시지 모사 (여기서는 그냥 print)
+                    print(f"[Node {self.node_id_hex[:8]}] → [Node {node_hex[:8]}] 복제: {key[:8]}")
+
+    # 간단 라우팅 (핵심: 키 기반 점진적 탐색)
+    def route_query(self, amp_addr_hex, network):
+        # network: 노드 ID hex → Node 객체 맵
+        if amp_addr_hex in self.data_store:
+            return self.data_store[amp_addr_hex]
+
+        # 현재 노드에서 가까운 노드들 검색 (K개)
+        closest_nodes = self.find_closest_nodes(amp_addr_hex, self.K)
+        for n_hex in closest_nodes:
+            if n_hex == self.node_id_hex:
+                continue
+            peer_node = network.get(n_hex)
+            if not peer_node:
+                continue
+            data = peer_node.get_data(amp_addr_hex)
+            if data:
+                return data
+        return None
+
+
+# --- 네트워크 시뮬레이터 ---
+class NetworkSimulator:
+    def __init__(self, num_nodes=100):
+        self.nodes = {}
+        self.num_nodes = num_nodes
+        self._init_nodes()
+
+    def _init_nodes(self):
+        for _ in range(self.num_nodes):
+            # 무작위 노드ID 생성
+            rid = random.getrandbits(128)
+            node_id = rid.to_bytes(16, 'big')
+            node = Node(node_id)
+            self.nodes[node.node_id_hex] = node
+
+        # 노드 상호 연결 (랜덤 피어링)
+        node_hexes = list(self.nodes.keys())
+        for node_hex in node_hexes:
+            node = self.nodes[node_hex]
+            peers = random.sample(node_hexes, min(10, len(node_hexes)))
+            for p in peers:
+                if p != node_hex:
+                    node.add_peer(p)
+
+    def store_page(self, page_id, html):
+        # 페이지 진폭 주소 생성
+        addr_bytes = amplitude_address(html)
+        addr_hex = bytes_to_hex(addr_bytes)
+
+        # 가까운 노드 찾기 (라운드로빈 대신 K-closest)
+        nodes_sorted = sorted(self.nodes.values(), key=lambda n: xor_distance(n.node_id, addr_bytes))
+        # 대표 노드 1개에 저장 + K-1개 복제
+        for node in nodes_sorted[:Node.K]:
+            node.store_data(addr_hex, page_id, html)
+
+        print(f"[Network] '{page_id}' 저장완료 @ {addr_hex[:8]}")
+
+    def search_page(self, keyword):
+        # 키워드를 주소로 해시화
+        key_addr = amplitude_address(keyword)
+        key_hex = bytes_to_hex(key_addr)
+
+        # 랜덤 노드에서 검색 시작 (노드 임의 선택)
+        start_node = random.choice(list(self.nodes.values()))
+        print(f"[Search] '{keyword}' 시작 노드: {start_node.node_id_hex[:8]}")
+
+        # 점진적 라우팅 (여기선 단순 탐색)
+        result = start_node.route_query(key_hex, self.nodes)
+        if result:
+            print(f"[Search] 결과: {result[0]} (길이 {len(result[1])})")
+        else:
+            print("[Search] 결과 없음")
+
+        return result
+
+
+# --- Flask 서버 (네트워크 내 하나의 노드 역할) ---
+app = Flask(__name__)
+
+network_sim = NetworkSimulator(num_nodes=200)  # 200 노드 대규모 시뮬레이션
+
+@app.route("/store", methods=["POST"])
+def api_store():
+    data = request.json
+    page_id = data.get("page_id")
+    html = data.get("html")
+    if not page_id or not html:
+        return {"error": "Missing page_id or html"}, 400
+    network_sim.store_page(page_id, html)
+    return {"status": "stored"}, 200
+
+@app.route("/search")
+def api_search():
+    keyword = request.args.get("q", "")
+    if not keyword:
+        return {"error": "Missing query"}, 400
+    res = network_sim.search_page(keyword)
+    if res:
+        return {"page_id": res[0], "html": res[1]}
+    else:
+        return {"error": "Not found"}, 404
+
+@app.route("/status")
+def api_status():
+    return {"nodes": len(network_sim.nodes)}
+
+if __name__ == "__main__":
+    print("Web4 대규모 분산 네트워크 시뮬레이터 실행 중 (포트 8080)")
+    app.run(port=8080)
