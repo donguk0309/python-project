@@ -1,0 +1,170 @@
+import decimal
+from flask import Flask, request
+from bs4 import BeautifulSoup
+import re
+
+decimal.getcontext().prec = 1000
+D = decimal.Decimal
+
+# ----------------------------------
+# Web4 Storage Layer
+# ----------------------------------
+
+class Web4Storage:
+    def __init__(self):
+        self.mapping_table = {}
+        self.inverse_table = {}
+        self.pages = {}
+        self.next_id = 1
+
+    def tokenize_html(self, html):
+        soup = BeautifulSoup(html, 'html.parser')
+        tokens = []
+        self._walk(soup, tokens)
+        return tokens
+
+    def _walk(self, node, tokens):
+        if node.name:
+            self._add_token(f"<{node.name}>", tokens)
+            for attr, value in node.attrs.items():
+                self._add_token(f"{attr}='{value}'", tokens)
+        if node.string and node.string.strip():
+            self._add_token(node.string.strip(), tokens)
+        for child in node.children:
+            self._walk(child, tokens)
+        if node.name:
+            self._add_token(f"</{node.name}>", tokens)
+
+    def _add_token(self, token, tokens):
+        if token not in self.mapping_table:
+            self.mapping_table[token] = self.next_id
+            self.inverse_table[self.next_id] = token
+            self.next_id += 1
+        tokens.append(token)
+
+    def store_page(self, page_id, html):
+        tokens = self.tokenize_html(html)
+        amplitudes = self.tokens_to_amplitudes(tokens)
+        self.pages[page_id] = amplitudes
+
+    def tokens_to_amplitudes(self, tokens):
+        N = D(self.next_id - 1)
+        norm = (N * (N + 1) * (2 * N + 1) / 6).sqrt()
+        return [D(self.mapping_table[token]) / norm for token in tokens]
+
+    def amplitudes_to_tokens(self, amplitudes):
+        N = D(self.next_id - 1)
+        norm = (N * (N + 1) * (2 * N + 1) / 6).sqrt()
+        tokens = []
+        for amp in amplitudes:
+            idx = int((amp * norm).to_integral_value(decimal.ROUND_HALF_UP))
+            tokens.append(self.inverse_table.get(idx, "<UNKNOWN>"))
+        return tokens
+
+    def reconstruct_html(self, page_id):
+        amplitudes = self.pages.get(page_id, [])
+        tokens = self.amplitudes_to_tokens(amplitudes)
+        html = ""
+        for token in tokens:
+            if re.match(r"<.*?>", token):
+                html += token
+            elif "=" in token:
+                html += " " + token
+            else:
+                html += token
+        return html
+
+# ----------------------------------
+# Web4 Indexer & Search
+# ----------------------------------
+
+class Web4Indexer:
+    def __init__(self, storage):
+        self.storage = storage
+
+    def search(self, keyword):
+        result = []
+        for page_id, amplitudes in self.storage.pages.items():
+            tokens = self.storage.amplitudes_to_tokens(amplitudes)
+            if any(keyword.lower() in token.lower() for token in tokens):
+                result.append(page_id)
+        return result
+
+# ----------------------------------
+# Web4 Quantum Recommendation Engine
+# ----------------------------------
+
+class Web4Recommender:
+    def __init__(self, storage):
+        self.storage = storage
+
+    def recommend(self, page_id):
+        # 간단한 유사성 기반 추천 (진폭 오버랩)
+        target = self.storage.pages[page_id]
+        scores = []
+        for other_id, amps in self.storage.pages.items():
+            if other_id == page_id:
+                continue
+            score = sum(a * b for a, b in zip(target, amps))
+            scores.append((score, other_id))
+        scores.sort(reverse=True)
+        return [pid for _, pid in scores[:3]]
+
+# ----------------------------------
+# Web4 Quantum Global Server
+# ----------------------------------
+
+app = Flask(__name__)
+storage = Web4Storage()
+
+# 예시 페이지 삽입
+storage.store_page("home", """
+<html><head><title>Web4 Home</title></head>
+<body><h1>Welcome to Web4 Quantum Internet!</h1><p>The future of the web.</p></body></html>
+""")
+
+storage.store_page("news", """
+<html><head><title>Quantum News</title></head>
+<body><h1>Today's Quantum Breakthrough!</h1><p>Revolutionizing the world via amplitudes.</p></body></html>
+""")
+
+storage.store_page("about", """
+<html><head><title>About Web4</title></head>
+<body><h1>About Web4 Project</h1><p>We compress the entire web into quantum amplitudes.</p></body></html>
+""")
+
+indexer = Web4Indexer(storage)
+recommender = Web4Recommender(storage)
+
+@app.route("/")
+def home():
+    return storage.reconstruct_html("home")
+
+@app.route("/page/<page_id>")
+def serve_page(page_id):
+    html = storage.reconstruct_html(page_id)
+    if not html:
+        return "Page Not Found", 404
+    return html
+
+@app.route("/search")
+def search():
+    keyword = request.args.get("q", "")
+    results = indexer.search(keyword)
+    html = "<h1>Search Results</h1><ul>"
+    for pid in results:
+        html += f"<li><a href='/page/{pid}'>{pid}</a></li>"
+    html += "</ul>"
+    return html
+
+@app.route("/recommend/<page_id>")
+def recommend(page_id):
+    results = recommender.recommend(page_id)
+    html = "<h1>Recommended Pages</h1><ul>"
+    for pid in results:
+        html += f"<li><a href='/page/{pid}'>{pid}</a></li>"
+    html += "</ul>"
+    return html
+
+if __name__ == "__main__":
+    app.run(port=8080)
