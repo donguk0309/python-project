@@ -1,0 +1,158 @@
+import decimal
+from flask import Flask, request, jsonify
+from bs4 import BeautifulSoup
+import re
+from concurrent.futures import ThreadPoolExecutor
+import threading
+
+decimal.getcontext().prec = 500
+D = decimal.Decimal
+
+class AmplitudeWebNode:
+    def __init__(self, node_id):
+        self.node_id = node_id
+        self.token_to_id = {}
+        self.id_to_token = {}
+        self.next_id = 1
+        self.pages = {}
+        self.lock = threading.Lock()  # 동시성 안전
+        self.cache = {}  # 진폭 → html 캐시
+
+    def tokenize_html(self, html):
+        soup = BeautifulSoup(html, 'html.parser')
+        tokens = []
+        self._walk(soup, tokens)
+        return tokens
+
+    def _walk(self, node, tokens):
+        if node.name:
+            self._add_token(f"<{node.name}>", tokens)
+            for attr, value in node.attrs.items():
+                self._add_token(f"{attr}='{value}'", tokens)
+        if node.string and node.string.strip():
+            self._add_token(node.string.strip(), tokens)
+        for child in node.children:
+            self._walk(child, tokens)
+        if node.name:
+            self._add_token(f"</{node.name}>", tokens)
+
+    def _add_token(self, token, tokens):
+        with self.lock:
+            if token not in self.token_to_id:
+                self.token_to_id[token] = self.next_id
+                self.id_to_token[self.next_id] = token
+                self.next_id += 1
+        tokens.append(token)
+
+    def normalization_constant(self, N):
+        return (D(N) * D(N + 1) * D(2 * N + 1) / 6).sqrt()
+
+    def tokens_to_amplitudes(self, tokens):
+        N = self.next_id - 1
+        norm = self.normalization_constant(N)
+        amplitudes = []
+        for t in tokens:
+            idx = self.token_to_id[t]
+            amplitudes.append(D(idx) / norm)
+        return amplitudes
+
+    def amplitudes_to_tokens(self, amplitudes):
+        N = self.next_id - 1
+        norm = self.normalization_constant(N)
+        tokens = []
+        for amp in amplitudes:
+            idx = int((amp * norm).to_integral_value(decimal.ROUND_HALF_UP))
+            tokens.append(self.id_to_token.get(idx, "<UNKNOWN>"))
+        return tokens
+
+    def store_page(self, page_id, html):
+        tokens = self.tokenize_html(html)
+        amplitudes = self.tokens_to_amplitudes(tokens)
+        with self.lock:
+            self.pages[page_id] = amplitudes
+            # 캐시 초기화
+            self.cache.pop(page_id, None)
+
+    def reconstruct_html(self, page_id):
+        with self.lock:
+            if page_id in self.cache:
+                return self.cache[page_id]
+
+            amplitudes = self.pages.get(page_id, [])
+            tokens = self.amplitudes_to_tokens(amplitudes)
+        
+        html = ""
+        prev_was_tag = False
+        for token in tokens:
+            if re.match(r"^<.*>$", token):
+                html += token
+                prev_was_tag = True
+            elif "=" in token and prev_was_tag:
+                html = html.rstrip('>') + " " + token + ">"
+            else:
+                if not prev_was_tag:
+                    html += " "
+                html += token
+                prev_was_tag = False
+
+        with self.lock:
+            self.cache[page_id] = html
+
+        return html
+
+# 진폭 기반 라우팅 (단순 해시)
+def find_node_for_query(query, nodes):
+    idx = sum(ord(c) for c in query) % len(nodes)
+    return nodes[idx]
+
+# 다중 페이지 동시 처리용 쓰레드풀
+thread_pool = ThreadPoolExecutor(max_workers=8)
+
+# 3개 노드 분산 네트워크 시뮬레이션
+nodes = [AmplitudeWebNode(i) for i in range(3)]
+
+# 예제 여러 페이지 저장
+sample_pages = {
+    "home": "<html><body><h1>Welcome to Web4</h1><p>Distributed amplitude web.</p></body></html>",
+    "news": "<html><body><h1>Quantum News</h1><p>Latest updates on amplitude web.</p></body></html>",
+    "about": "<html><body><h1>About Us</h1><p>Web4 node network info.</p></body></html>",
+    "contact": "<html><body><h1>Contact</h1><p>Email: contact@web4.org</p></body></html>",
+    "blog": "<html><body><h1>Blog</h1><p>Amplitude web blog posts here.</p></body></html>",
+}
+
+for pid, content in sample_pages.items():
+    node = find_node_for_query(pid, nodes)
+    node.store_page(pid, content)
+
+app = Flask(__name__)
+
+@app.route('/')
+def index():
+    return """
+    <h2>Web4 Amplitude Distributed Network</h2>
+    <form action="/query" method="get">
+        <input name="q" placeholder="Search page ID (home/news/about/contact/blog)" />
+        <button type="submit">Search</button>
+    </form>
+    """
+
+@app.route('/query')
+def query():
+    keyword = request.args.get('q', '')
+    node = find_node_for_query(keyword, nodes)
+
+    def process_request():
+        if keyword in node.pages:
+            html = node.reconstruct_html(keyword)
+            return f"<h3>Served by Node {node.node_id}</h3>" + html
+        else:
+            return f"<h3>Not found on Node {node.node_id}</h3>", 404
+
+    future = thread_pool.submit(process_request)
+    result = future.result()  # 비동기 처리 완료 기다림
+
+    return result
+
+if __name__ == '__main__':
+    print("Starting Web4 amplitude distributed server on port 8080...")
+    app.run(port=8080, threaded=True)
