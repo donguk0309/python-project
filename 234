@@ -1,0 +1,294 @@
+import threading
+import time
+import random
+import decimal
+import math
+import json
+from flask import Flask, request
+from bs4 import BeautifulSoup
+import re
+
+decimal.getcontext().prec = 1000
+D = decimal.Decimal
+
+# --- 진폭 주소 벡터 차원 ---
+AMPLITUDE_DIM = 128
+
+def vector_norm(vec):
+    s = sum(x*x for x in vec)
+    return math.sqrt(s)
+
+def normalize(vec):
+    norm = vector_norm(vec)
+    if norm == 0:
+        return vec
+    return [x / norm for x in vec]
+
+def euclidean_distance(v1, v2):
+    return math.sqrt(sum((a-b)**2 for a,b in zip(v1, v2)))
+
+# --- Web4 Node 구현 ---
+class Web4Node:
+    def __init__(self, node_id):
+        self.node_id = node_id
+        self.address = normalize([random.random() for _ in range(AMPLITUDE_DIM)])  # 진폭 주소
+        self.mapping_table = {}    # 토큰 → ID
+        self.inverse_table = {}    # ID → 토큰
+        self.pages = {}            # page_id → amplitude vector
+        self.next_id = 1
+        self.peers = set()         # 직접 연결된 피어 노드 집합
+        self.global_index = {}     # 키워드 → set(page_id)
+        self.lock = threading.Lock()
+        print(f"[Node {self.node_id}] 생성됨, 주소: {self.address[:5]}...")
+
+    # HTML 토큰화
+    def tokenize_html(self, html):
+        soup = BeautifulSoup(html, 'html.parser')
+        tokens = []
+        self._walk(soup, tokens)
+        return tokens
+
+    def _walk(self, node, tokens):
+        if node.name:
+            self._add_token(f"<{node.name}>", tokens)
+            for attr, value in node.attrs.items():
+                self._add_token(f"{attr}='{value}'", tokens)
+        if node.string and node.string.strip():
+            self._add_token(node.string.strip(), tokens)
+        for child in node.children:
+            self._walk(child, tokens)
+        if node.name:
+            self._add_token(f"</{node.name}>", tokens)
+
+    def _add_token(self, token, tokens):
+        with self.lock:
+            if token not in self.mapping_table:
+                self.mapping_table[token] = self.next_id
+                self.inverse_table[self.next_id] = token
+                self.next_id += 1
+        tokens.append(token)
+
+    def tokens_to_amplitudes(self, tokens):
+        with self.lock:
+            N = D(self.next_id - 1)
+            if N == 0:
+                return []
+            norm = (N * (N + 1) * (2 * N + 1) / 6).sqrt()
+            # 각 토큰 id / norm 값을 벡터로 만듦 (단순화)
+            amps = [float(D(self.mapping_table[token]) / norm) for token in tokens]
+            # 차원 맞추기 위해 패딩 또는 절단
+            if len(amps) < AMPLITUDE_DIM:
+                amps.extend([0.0] * (AMPLITUDE_DIM - len(amps)))
+            else:
+                amps = amps[:AMPLITUDE_DIM]
+            # 정규화
+            amps = normalize(amps)
+            return amps
+
+    def amplitudes_to_tokens(self, amplitudes):
+        with self.lock:
+            N = D(self.next_id - 1)
+            if N == 0:
+                return []
+            norm = (N * (N + 1) * (2 * N + 1) / 6).sqrt()
+            tokens = []
+            for amp in amplitudes:
+                idx = int(round(amp * float(norm)))
+                tokens.append(self.inverse_table.get(idx, "<UNKNOWN>"))
+            return tokens
+
+    # 페이지 저장
+    def store_page(self, page_id, html):
+        tokens = self.tokenize_html(html)
+        amplitudes = self.tokens_to_amplitudes(tokens)
+        with self.lock:
+            self.pages[page_id] = amplitudes
+            self._update_global_index(page_id, tokens)
+        print(f"[Node {self.node_id}] '{page_id}' 저장됨, 토큰수: {len(tokens)}")
+
+    # 글로벌 인덱스 갱신
+    def _update_global_index(self, page_id, tokens):
+        for token in tokens:
+            key = token.lower()
+            if key not in self.global_index:
+                self.global_index[key] = set()
+            self.global_index[key].add(page_id)
+
+    # HTML 재구성 (단순 토큰 연결)
+    def reconstruct_html(self, page_id):
+        with self.lock:
+            amplitudes = self.pages.get(page_id, [])
+        tokens = self.amplitudes_to_tokens(amplitudes)
+        html = ""
+        for token in tokens:
+            if re.match(r"<.*?>", token):
+                html += token
+            elif "=" in token:
+                html += " " + token
+            else:
+                html += token
+        return html
+
+    # P2P 노드 연결 (양방향)
+    def connect_peer(self, peer_node):
+        if peer_node != self:
+            self.peers.add(peer_node)
+            peer_node.peers.add(self)
+            print(f"[Node {self.node_id}] <--> [Node {peer_node.node_id}] 연결됨")
+
+    # 진폭 주소 기반 최적 이웃 찾기
+    def find_closest_peer(self, target_address):
+        min_dist = float('inf')
+        closest = None
+        for peer in self.peers:
+            dist = euclidean_distance(peer.address, target_address)
+            if dist < min_dist:
+                min_dist = dist
+                closest = peer
+        return closest
+
+    # 진폭 기반 라우팅 (최소 거리 방향 재귀)
+    def route_message(self, target_address, message, visited=None, hop_limit=10):
+        if visited is None:
+            visited = set()
+        visited.add(self)
+        dist_to_target = euclidean_distance(self.address, target_address)
+        # 도착 노드 판단: 주소 거리 0.01 이하일 때 도착
+        if dist_to_target < 0.01 or hop_limit == 0:
+            print(f"[Node {self.node_id}] 메시지 도착 (거리 {dist_to_target:.4f}), 처리: {message}")
+            return self.process_message(message)
+        # 가까운 피어로 전달
+        next_hop = self.find_closest_peer(target_address)
+        if not next_hop or next_hop in visited:
+            print(f"[Node {self.node_id}] 더 이상 라우팅 불가, 메시지 폐기")
+            return None
+        print(f"[Node {self.node_id}] → [Node {next_hop.node_id}] 메시지 전달 (거리 {dist_to_target:.4f})")
+        return next_hop.route_message(target_address, message, visited, hop_limit -1)
+
+    # 메시지 처리 (검색 또는 저장)
+    def process_message(self, message):
+        mtype = message.get("type")
+        if mtype == "search":
+            keyword = message.get("keyword","")
+            results = self.search(keyword)
+            return {"node": self.node_id, "results": results}
+        elif mtype == "store":
+            page_id = message.get("page_id")
+            html = message.get("html")
+            if page_id and html:
+                self.store_page(page_id, html)
+                return {"node": self.node_id, "status": "stored"}
+            else:
+                return {"error": "missing page_id or html"}
+        else:
+            return {"error": "unknown message type"}
+
+    # 데이터 복제 (자가 복제)
+    def replicate_data(self):
+        for peer in list(self.peers):
+            with self.lock:
+                for pid, amps in self.pages.items():
+                    if pid not in peer.pages:
+                        peer.pages[pid] = amps
+                        peer._update_global_index(pid, self.amplitudes_to_tokens(amps))
+                        print(f"[Node {self.node_id}] → [Node {peer.node_id}] '{pid}' 복제 완료")
+
+    # 주기적 동기화 스레드
+    def start_replication_thread(self, interval=10):
+        def replicate_loop():
+            while True:
+                time.sleep(interval)
+                self.replicate_data()
+        t = threading.Thread(target=replicate_loop, daemon=True)
+        t.start()
+
+# --- 다수 노드 생성 및 연결 ---
+NUM_NODES = 20
+nodes = [Web4Node(i) for i in range(NUM_NODES)]
+
+# 랜덤 피어 연결 (각 노드 3~5 피어)
+for node in nodes:
+    others = [n for n in nodes if n != node]
+    num_peers = random.randint(3,5)
+    peers = random.sample(others, num_peers)
+    for p in peers:
+        node.connect_peer(p)
+
+# 초기 페이지 저장 (임의 노드에 분산 저장)
+sample_pages = [
+    ("home", "<html><body><h1>Home Page</h1><p>Welcome to Web4.</p></body></html>"),
+    ("quantum", "<html><body><h1>Quantum News</h1><p>Latest quantum updates.</p></body></html>"),
+    ("about", "<html><body><h1>About Web4</h1><p>Decentralized web system.</p></body></html>"),
+]
+for pid, html in sample_pages:
+    node = random.choice(nodes)
+    node.store_page(pid, html)
+
+# 모든 노드 복제 스레드 시작
+for node in nodes:
+    node.start_replication_thread(interval=15)
+
+# --- Flask API 서버 ---
+app = Flask(__name__)
+
+def find_node_closest_to_address(address):
+    min_dist = float('inf')
+    closest_node = None
+    for node in nodes:
+        dist = euclidean_distance(node.address, address)
+        if dist < min_dist:
+            min_dist = dist
+            closest_node = node
+    return closest_node
+
+@app.route("/query")
+def query():
+    keyword = request.args.get("q","").lower()
+    if not keyword:
+        return {"error":"missing query"}, 400
+    # 진폭 주소 생성 (간단: 키워드 문자코드 기반 고정 벡터)
+    seed = sum(ord(c) for c in keyword)
+    random.seed(seed)
+    target_address = normalize([random.random() for _ in range(AMPLITUDE_DIM)])
+    # 가장 가까운 노드 찾아 라우팅 시작
+    start_node = random.choice(nodes)
+    response = start_node.route_message(target_address, {"type":"search", "keyword": keyword})
+    if response and "results" in response and response["results"]:
+        page_id = response["results"][0]
+        # 결과 HTML 재구성 및 반환
+        node = nodes[response["node"]]
+        html = node.reconstruct_html(page_id)
+        return f"<h3>Node {response['node']} served your query</h3>" + html
+    return "Not Found", 404
+
+@app.route("/store", methods=["POST"])
+def store():
+    data = request.json
+    page_id = data.get("page_id")
+    html = data.get("html")
+    if not page_id or not html:
+        return {"error":"missing page_id or html"}, 400
+    # 진폭 주소 생성 (페이지 ID 기반)
+    seed = sum(ord(c) for c in page_id)
+    random.seed(seed)
+    target_address = normalize([random.random() for _ in range(AMPLITUDE_DIM)])
+    # 가장 가까운 노드 찾아 저장 메시지 라우팅
+    start_node = random.choice(nodes)
+    response = start_node.route_message(target_address, {"type":"store", "page_id":page_id, "html":html})
+    return response or {"error":"failed to store"}
+
+@app.route("/status")
+def status():
+    result = {}
+    for node in nodes:
+        with node.lock:
+            result[node.node_id] = {
+                "address": [round(x,3) for x in node.address[:5]],
+                "pages": list(node.pages.keys()),
+                "peers": [p.node_id for p in node.peers]
+            }
+    return json.dumps(result, indent=2)
+
+if __name__ == "__main__":
+    print("Web4 Node Network 시작")
+    app.run(port=8000)
