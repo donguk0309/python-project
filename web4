@@ -1,0 +1,126 @@
+import decimal
+from flask import Flask, request
+from bs4 import BeautifulSoup
+
+decimal.getcontext().prec = 1000
+D = decimal.Decimal
+
+# -------------------------------
+# Web4 Quantum Storage
+# -------------------------------
+
+class Web4QuantumStorage:
+    def __init__(self, mapping_table):
+        self.mapping_table = mapping_table
+        self.inverse_table = {v: k for k, v in mapping_table.items()}
+        self.N = D(max(mapping_table.values()))
+        self.norm = self.normalization_constant(self.N)
+
+    def normalization_constant(self, n):
+        return (n * (n + 1) * (2 * n + 1) / 6).sqrt()
+
+    def amplitude(self, i):
+        i = D(i)
+        return i / self.norm
+
+    def id_from_amplitude(self, amplitude):
+        i = (D(amplitude) * self.norm).to_integral_value(rounding=decimal.ROUND_HALF_UP)
+        return int(i)
+
+    def reconstruct_tokens(self, amplitudes):
+        tokens = []
+        for amp in amplitudes:
+            id_val = self.id_from_amplitude(amp)
+            token = self.inverse_table.get(id_val, "<UNKNOWN>")
+            tokens.append(token)
+        return tokens
+
+# -------------------------------
+# HTML 파서 및 토크나이저
+# -------------------------------
+
+class Web4HTMLParser:
+    def __init__(self):
+        self.mapping_table = {}
+        self.next_id = 1
+
+    def tokenize_html(self, html):
+        soup = BeautifulSoup(html, 'html.parser')
+        tokens = []
+        self._walk(soup, tokens)
+        return tokens
+
+    def _walk(self, node, tokens):
+        if node.name:
+            self._add_token(f"<{node.name}>", tokens)
+            for attr, value in node.attrs.items():
+                self._add_token(f"{attr}='{value}'", tokens)
+        if node.string and node.string.strip():
+            self._add_token(node.string.strip(), tokens)
+        for child in node.children:
+            self._walk(child, tokens)
+        if node.name:
+            self._add_token(f"</{node.name}>", tokens)
+
+    def _add_token(self, token, tokens):
+        if token not in self.mapping_table:
+            self.mapping_table[token] = self.next_id
+            self.next_id += 1
+        tokens.append(token)
+
+# -------------------------------
+# HTML 재구성기
+# -------------------------------
+
+class Web4HTMLReconstructor:
+    def __init__(self, tokens):
+        self.tokens = tokens
+
+    def reconstruct_html(self):
+        html = ""
+        for token in self.tokens:
+            if token.startswith("<") and token.endswith(">"):
+                html += token
+            elif "='" in token:
+                html += " " + token
+            else:
+                html += token
+        return html
+
+# -------------------------------
+# Web4 Quantum Server 시작
+# -------------------------------
+
+app = Flask(__name__)
+
+# 최초 HTML 예시
+initial_html = """
+<html>
+<head><title>Web4 Server Test</title></head>
+<body>
+<h1>Welcome to Web4 Quantum Server!</h1>
+<p>This page is generated from amplitudes.</p>
+<a href='https://web4.future'>Web4 Home</a>
+</body>
+</html>
+"""
+
+# 토큰화 및 진폭 엔진 사전 준비 (서버 시작시 1회만)
+parser = Web4HTMLParser()
+tokens = parser.tokenize_html(initial_html)
+mapping_table = parser.mapping_table
+web4 = Web4QuantumStorage(mapping_table)
+
+# 진폭 벡터 저장 (이게 바로 서버의 전부다!)
+amplitudes = [web4.amplitude(mapping_table[token]) for token in tokens]
+
+@app.route("/")
+def serve():
+    # 요청마다 실시간 복원 수행
+    reconstructed_tokens = web4.reconstruct_tokens(amplitudes)
+    reconstructor = Web4HTMLReconstructor(reconstructed_tokens)
+    reconstructed_html = reconstructor.reconstruct_html()
+    return reconstructed_html
+
+if __name__ == '__main__':
+    app.run(port=8080)
