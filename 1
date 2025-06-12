@@ -1,0 +1,105 @@
+import decimal
+import random
+import threading
+from flask import Flask, request
+from bs4 import BeautifulSoup
+import re
+
+decimal.getcontext().prec = 1000
+D = decimal.Decimal
+
+# 진폭 분산 네트워크에서 가장 핵심되는 Web4 Node 클래스
+class Web4Node:
+    def __init__(self, node_id):
+        self.node_id = node_id
+        self.mapping_table = {}
+        self.inverse_table = {}
+        self.pages = {}
+        self.next_id = 1
+
+    def tokenize_html(self, html):
+        soup = BeautifulSoup(html, 'html.parser')
+        tokens = []
+        self._walk(soup, tokens)
+        return tokens
+
+    def _walk(self, node, tokens):
+        if node.name:
+            self._add_token(f"<{node.name}>", tokens)
+            for attr, value in node.attrs.items():
+                self._add_token(f"{attr}='{value}'", tokens)
+        if node.string and node.string.strip():
+            self._add_token(node.string.strip(), tokens)
+        for child in node.children:
+            self._walk(child, tokens)
+        if node.name:
+            self._add_token(f"</{node.name}>", tokens)
+
+    def _add_token(self, token, tokens):
+        if token not in self.mapping_table:
+            self.mapping_table[token] = self.next_id
+            self.inverse_table[self.next_id] = token
+            self.next_id += 1
+        tokens.append(token)
+
+    def store_page(self, page_id, html):
+        tokens = self.tokenize_html(html)
+        amplitudes = self.tokens_to_amplitudes(tokens)
+        self.pages[page_id] = amplitudes
+
+    def tokens_to_amplitudes(self, tokens):
+        N = D(self.next_id - 1)
+        norm = (N * (N + 1) * (2 * N + 1) / 6).sqrt()
+        return [D(self.mapping_table[token]) / norm for token in tokens]
+
+    def amplitudes_to_tokens(self, amplitudes):
+        N = D(self.next_id - 1)
+        norm = (N * (N + 1) * (2 * N + 1) / 6).sqrt()
+        tokens = []
+        for amp in amplitudes:
+            idx = int((amp * norm).to_integral_value(decimal.ROUND_HALF_UP))
+            tokens.append(self.inverse_table.get(idx, "<UNKNOWN>"))
+        return tokens
+
+    def reconstruct_html(self, page_id):
+        amplitudes = self.pages.get(page_id, [])
+        tokens = self.amplitudes_to_tokens(amplitudes)
+        html = ""
+        for token in tokens:
+            if re.match(r"<.*?>", token):
+                html += token
+            elif "=" in token:
+                html += " " + token
+            else:
+                html += token
+        return html
+
+# 샘플 네트워크에 3개 노드 구성
+nodes = [Web4Node(i) for i in range(3)]
+
+# 각 노드에 분산저장
+nodes[0].store_page("home", "<html><body><h1>Home of Web4</h1></body></html>")
+nodes[1].store_page("news", "<html><body><h1>Quantum News Today</h1></body></html>")
+nodes[2].store_page("about", "<html><body><h1>About Web4 System</h1></body></html>")
+
+# 전체 네트워크 라우팅 함수 (진폭기반 간단 샘플)
+def find_node_for_query(query):
+    idx = sum(ord(c) for c in query) % len(nodes)
+    return nodes[idx]
+
+# 네트워크 전체 API 서버 (단일 진입점)
+app = Flask(__name__)
+
+@app.route("/query")
+def query():
+    keyword = request.args.get("q", "")
+    node = find_node_for_query(keyword)
+    # 매우 단순한 검색 (확장 가능)
+    for pid in node.pages:
+        if keyword.lower() in pid.lower():
+            html = node.reconstruct_html(pid)
+            return f"<h1>Served by Node {node.node_id}</h1>" + html
+    return "Not Found"
+
+if __name__ == "__main__":
+    app.run(port=8080)
