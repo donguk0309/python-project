@@ -1,0 +1,60 @@
+import numpy as np
+import time
+
+# APU 하이퍼파라미터
+NUM_VARS = 20
+NUM_COMBINATIONS = 2 ** NUM_VARS
+NUM_CLAUSES = 50
+
+np.random.seed(42)
+
+# 절 생성: 3개의 변수 인덱스와 NOT 여부
+def generate_clauses(num_vars, num_clauses):
+    clauses = []
+    for _ in range(num_clauses):
+        idx = np.random.choice(num_vars, 3, replace=False)
+        signs = np.random.randint(0, 2, 3)  # 0 = True, 1 = NOT
+        clause = [(idx[i], signs[i]) for i in range(3)]
+        clauses.append(clause)
+    return clauses
+
+clauses = generate_clauses(NUM_VARS, NUM_CLAUSES)
+
+# 비트 조합 생성 (벡터 기반 APU 연산)
+def generate_all_combinations(n):
+    return np.unpackbits(
+        np.arange(2**n, dtype=np.uint32)[:, None].view(np.uint8), axis=1
+    )[:, -n:]
+
+# 진폭 계산 (벡터화된 방식)
+def calculate_amplitudes(assignments, clauses):
+    mask = np.ones(assignments.shape[0], dtype=bool)
+
+    for clause in clauses:
+        clause_result = np.zeros(assignments.shape[0], dtype=bool)
+        for idx, inv in clause:
+            if inv:
+                clause_result |= ~assignments[:, idx]
+            else:
+                clause_result |= assignments[:, idx]
+        mask &= clause_result
+
+    return mask
+
+# 실행
+start = time.time()
+
+assignments = generate_all_combinations(NUM_VARS)
+valid_mask = calculate_amplitudes(assignments, clauses)
+
+# 진폭 누적: 조건 만족한 조합 수
+valid_count = np.sum(valid_mask)
+total_amplitude = valid_count / np.sqrt(NUM_COMBINATIONS)
+
+end = time.time()
+
+# 결과 출력
+print("✔ 조건 만족하는 조합 수:", valid_count)
+print("✔ 전체 진폭 합:", total_amplitude)
+print("✔ SAT 결과:", "SATISFIABLE" if valid_count > 0 else "UNSATISFIABLE")
+print("⏱ 계산 시간:", f"{end - start:.4f}초")
