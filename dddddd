@@ -1,0 +1,32 @@
+1. 파일 업로드 시 수식화
+사용자가 파일을 업로드하면, 파일 내용을 실제로 저장하지 않음.
+
+대신, 해당 파일 내용을 SHA256 해시로 변환하여 seed_hash로 저장.
+
+그리고 파일의 size만 저장함.
+
+즉, 이 저장소는 실제 데이터 없이 해시(seed)와 크기만으로 파일을 기억함.
+
+python
+복사
+편집
+seed_hash = hashlib.sha256(data).hexdigest()
+2. 가상 파일 생성 원리 (VirtualYBFile)
+파일의 i번째 바이트가 필요할 때마다,
+SHA256(seed_hash + i)를 다시 계산하여 첫 번째 바이트를 사용.
+
+이 방식은 매번 수학적으로 동일한 값을 재생성함.
+
+결과적으로 “데이터를 저장하지 않아도 항상 같은 결과”를 보장.
+
+python
+복사
+편집
+def formula(self, i):
+    h = hashlib.sha256(f"{self.seed_hash}:{i}".encode()).digest()
+    return h[0]
+3. 다운로드 시
+저장된 파일의 이름과 크기를 바탕으로
+0부터 size까지 순차적으로 formula(i)를 호출하여 가상 데이터를 생성.
+
+사용자는 진짜 파일처럼 다운로드 가능.
