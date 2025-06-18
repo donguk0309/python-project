@@ -1,0 +1,14 @@
+import time
+
+# APU 연산 가속 - 진폭 기반 제곱합
+def apu_sum_squares(n):
+    return n * (n + 1) * (2 * n + 1) // 6  # 수학 공식 이용
+
+start = time.time()
+n = 1_000_000_000_000  # 1조
+result = apu_sum_squares(n)
+end = time.time()
+
+print("✅ APU 연산 가속 결과 (1부터 1조까지 제곱합):")
+print(result)
+print("⏱ 계산 시간:", end - start, "초")
