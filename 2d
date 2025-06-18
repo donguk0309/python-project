@@ -60,3 +60,47 @@ def apu_modular_exponentiation(a, p):
 # 테스트
 a, p = 3, 7
 print(f"{a}^{p-1} ≡ {apu_modular_exponentiation(a, p)} mod {p}")
+
+
+
+import hashlib
+import time
+
+# APU 가상 구조를 위한 진폭 기반 저장소 (단순 딕셔너리 시뮬레이션)
+apu_hash_table = {}
+
+# 진폭 기반 해시 생성
+def apu_generate_hashes(max_value=2**20):  # 데모용 범위
+    print("🔄 APU 병렬 해시 생성 중...")
+    start = time.time()
+    for i in range(max_value):
+        data = str(i).encode()
+        hash_val = hashlib.sha256(data).hexdigest()
+        apu_hash_table[hash_val] = i  # 진폭 메모리에 저장
+    end = time.time()
+    print(f"✅ 해시 생성 완료 (소요 시간: {end - start:.2f}초)")
+    print(f"📦 총 저장된 해시 수: {len(apu_hash_table)}")
+
+# 주어진 해시값에 대해 복호화 (탐색)
+def apu_reverse_hash(target_hash):
+    print(f"🔍 해시 복호화 시도: {target_hash}")
+    return apu_hash_table.get(target_hash, None)
+
+# 테스트 실행
+if __name__ == "__main__":
+    # 1. APU 방식으로 해시 테이블 생성
+    apu_generate_hashes()
+
+    # 2. 임의 수 -> 해시 -> 복호화 테스트
+    test_number = 123456
+    hash_value = hashlib.sha256(str(test_number).encode()).hexdigest()
+    print(f"\n🔒 원본 수: {test_number}")
+    print(f"🔐 해시값: {hash_value}")
+
+    # 3. APU 복호화 시도
+    result = apu_reverse_hash(hash_value)
+    if result is not None:
+        print(f"✅ 복호화 성공! 원본 수: {result}")
+    else:
+        print("❌ 복호화 실패: 해시값이 테이블에 없음")
+
