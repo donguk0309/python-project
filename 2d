@@ -104,3 +104,84 @@ if __name__ == "__main__":
     else:
         print("❌ 복호화 실패: 해시값이 테이블에 없음")
 
+
+
+
+
+import hashlib
+import time
+import os
+
+# 설정
+CHUNK_SIZE = 1000000  # 100만 개씩 저장
+OUTPUT_DIR = "apu_hash_chunks"
+
+# 진폭 기반 해시 생성 (x ~ y 범위)
+def apu_generate_hashes(x, y):
+    print(f"🔄 APU 해시 생성 중... 범위: {x} ~ {y - 1}")
+    os.makedirs(OUTPUT_DIR, exist_ok=True)
+
+    chunk = []
+    file_index = 0
+    start_time = time.time()
+
+    for i in range(x, y):
+        data = str(i).encode()
+        hash_val = hashlib.sha256(data).hexdigest()
+        chunk.append(f"{hash_val},{i}\n")
+
+        if len(chunk) >= CHUNK_SIZE:
+            filename = f"{OUTPUT_DIR}/hash_part_{file_index}.txt"
+            with open(filename, "w") as f:
+                f.writelines(chunk)
+            print(f"📁 저장: {filename} ({len(chunk)}개)")
+            chunk = []
+            file_index += 1
+
+    # 남은 데이터 저장
+    if chunk:
+        filename = f"{OUTPUT_DIR}/hash_part_{file_index}.txt"
+        with open(filename, "w") as f:
+            f.writelines(chunk)
+        print(f"📁 저장: {filename} ({len(chunk)}개)")
+
+    end_time = time.time()
+    print(f"✅ 해시 저장 완료 (총 파일 수: {file_index + 1}, 소요 시간: {end_time - start_time:.2f}초)")
+
+# 주어진 해시값 복호화 (모든 파일 탐색)
+def apu_reverse_hash(target_hash):
+    print(f"🔍 해시 복호화 시도: {target_hash}")
+    if not os.path.exists(OUTPUT_DIR):
+        print("❌ 오류: 저장된 해시 파일이 없습니다.")
+        return None
+
+    for filename in os.listdir(OUTPUT_DIR):
+        filepath = os.path.join(OUTPUT_DIR, filename)
+        with open(filepath, "r") as f:
+            for line in f:
+                hash_val, number = line.strip().split(",")
+                if hash_val == target_hash:
+                    return int(number)
+    return None
+
+# 테스트 실행
+if __name__ == "__main__":
+    # 1. 해시 테이블 생성
+    x = 100000
+    y = 1100000  # 총 100만 개 생성
+    apu_generate_hashes(x, y)
+
+    # 2. 테스트 숫자
+    test_number = 123456
+    hash_value = hashlib.sha256(str(test_number).encode()).hexdigest()
+    print(f"\n🔒 원본 수: {test_number}")
+    print(f"🔐 해시값: {hash_value}")
+
+    # 3. 복호화 시도
+    result = apu_reverse_hash(hash_value)
+    if result is not None:
+        print(f"✅ 복호화 성공! 원본 수: {result}")
+    else:
+        print("❌ 복호화 실패: 해시값이 없음")
+
+
