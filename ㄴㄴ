@@ -1,0 +1,25 @@
+import numpy as np
+from itertools import combinations
+
+def to_amplitudes(arr):
+    norm = np.sqrt(sum(x**2 for x in arr))
+    return [x / norm for x in arr]
+
+def apu_subset_sum(arr):
+    amplitudes = to_amplitudes(arr)
+    n = len(arr)
+    found = False
+    for r in range(1, n + 1):
+        for combo in combinations(range(n), r):
+            subset_sum = sum(arr[i] for i in combo)
+            amp_sum = sum(amplitudes[i] for i in combo)
+            if abs(subset_sum) < 1e-8:
+                print(f"✔️ 부분집합 합이 0인 조합 발견: {[arr[i] for i in combo]}")
+                print(f"⚡ 진폭합 (APU 기반): {amp_sum:.10f}")
+                found = True
+    if not found:
+        print("❌ 어떤 부분집합도 합이 0이 아님.")
+
+# 예제
+arr = [3, -2, 7, 1, -9]
+apu_subset_sum(arr)
