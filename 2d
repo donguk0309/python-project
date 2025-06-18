@@ -30,3 +30,33 @@ end = time.time()
 print(f"✅ APU 기반 정수론 (3제곱 합): 1부터 {n:,}까지의 i^3의 합")
 print(f" - 결과: {cubic_sum}")
 print(f"⏱ 계산 시간: {end - start:.8f}초")
+
+
+
+import numpy as np
+
+def apu_basel_convergence(epsilon=1e-10):
+    sum_amp = 0.0
+    n = 1
+    while True:
+        amp = 1 / (n ** 2)
+        sum_amp += amp
+        if amp < epsilon:
+            break
+        n += 1
+    return sum_amp, n
+
+val, terms = apu_basel_convergence()
+print(f"APU 기반 수렴값: {val:.12f} (총 {terms} 항)")
+
+
+def apu_modular_exponentiation(a, p):
+    # APU 기반: 진폭으로 a^(p-1) % p
+    result = 1
+    for _ in range(p - 1):
+        result = (result * a) % p
+    return result
+
+# 테스트
+a, p = 3, 7
+print(f"{a}^{p-1} ≡ {apu_modular_exponentiation(a, p)} mod {p}")
