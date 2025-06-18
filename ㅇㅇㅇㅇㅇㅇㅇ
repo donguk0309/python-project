@@ -1,0 +1,319 @@
+import numpy as np
+from itertools import product
+import time
+
+# 아주 복잡한 3-SAT 문제 만들기 (변수 수 증가)
+num_vars = 20  # 20개의 변수 → 2^20 = 약 100만 개 조합
+num_clauses = 50  # 50개의 절
+
+np.random.seed(42)
+
+# 무작위 절(clause) 생성
+def generate_random_clause(n_vars):
+    indices = np.random.choice(n_vars, 3, replace=False)
+    clause = [(int(i), bool(np.random.randint(0, 2))) for i in indices]
+    return clause
+
+clauses = [generate_random_clause(num_vars) for _ in range(num_clauses)]
+
+# 진폭 기반 APU-like 연산
+def satisfies_clause(assignment, clause):
+    return any((not assignment[i] if is_not else assignment[i]) for i, is_not in clause)
+
+def satisfies_all(assignment):
+    return all(satisfies_clause(assignment, clause) for clause in clauses)
+
+def to_amplitude(assignment):
+    return 1 / np.sqrt(2 ** num_vars) if satisfies_all(assignment) else 0
+
+# APU 연산: 진폭 누적 (해당 조합이 조건 만족하는 경우만 누적)
+start = time.time()
+
+total_amplitude = 0
+solutions = []
+count = 0
+
+# 2^20 = 1,048,576개의 조합
+for assignment in product([0, 1], repeat=num_vars):
+    count += 1
+    amp = to_amplitude(assignment)
+    total_amplitude += amp
+    if amp > 0:
+        solutions.append(assignment)
+
+end = time.time()
+elapsed = end - start
+
+{
+    "총 조합 수": count,
+    "조건 만족 조합 수": len(solutions),
+    "SAT 결과": "SATISFIABLE" if total_amplitude > 0 else "UNSATISFIABLE",
+    "계산 시간 (초)": elapsed
+}
+
+
+
+
+
+import numpy as np
+from itertools import product
+
+# 절(clause) 정의: [(변수 인덱스, 부정 여부)]
+clauses = [
+    [(0, False), (1, False), (2, False)],     # x1 ∨ x2 ∨ x3
+    [(0, True),  (1, False), (2, True)],      # ¬x1 ∨ x2 ∨ ¬x3
+    [(1, True),  (2, False), (3, False)]      # ¬x2 ∨ x3 ∨ x4
+]
+
+num_vars = 4  # 변수 수: x1 ~ x4
+assignments = list(product([0, 1], repeat=num_vars))
+
+def satisfies_clause(assignment, clause):
+    return any((not assignment[i] if is_not else assignment[i]) for i, is_not in clause)
+
+def satisfies_all(assignment):
+    return all(satisfies_clause(assignment, clause) for clause in clauses)
+
+def to_amplitude(assignment):
+    # 진폭은 2^n 상태 중 하나로 간주 (1은 상태 존재)
+    return 1 / np.sqrt(2 ** num_vars) if satisfies_all(assignment) else 0
+
+# APU 방식으로 상태 진폭 계산
+total_amplitude = 0
+solutions = []
+for a in assignments:
+    amp = to_amplitude(a)
+    total_amplitude += amp
+    if amp > 0:
+        solutions.append(a)
+
+print("✅ SAT 결과:", "SATISFIABLE" if total_amplitude > 0 else "UNSATISFIABLE")
+print("✔️ 가능한 해:")
+for sol in solutions:
+    print("  ", sol)
+
+
+
+
+import numpy as np
+from itertools import permutations, product
+import time
+
+### ① 반도체 설계 (논리 회로 최적화를 SAT 문제로 모델링)
+
+# 예시: AND-OR 조합 회로가 특정 출력값을 만족해야 하는 조건을 SAT로 표현
+def eda_sat_example():
+    num_vars = 6  # 게이트 입력선 개수
+    clauses = [
+        [(0, False), (1, False)],   # x0 OR x1
+        [(2, True), (3, False)],    # NOT x2 OR x3
+        [(4, False), (5, False)],   # x4 OR x5
+        [(1, True), (5, True)],     # NOT x1 OR NOT x5
+    ]
+
+    def satisfies_clause(assignment, clause):
+        return any((not assignment[i] if is_not else assignment[i]) for i, is_not in clause)
+
+    def satisfies_all(assignment):
+        return all(satisfies_clause(assignment, clause) for clause in clauses)
+
+    def to_amplitude(assignment):
+        return 1 / np.sqrt(2 ** num_vars) if satisfies_all(assignment) else 0
+
+    start = time.time()
+    total_amp = 0
+    solutions = []
+
+    for bits in product([0, 1], repeat=num_vars):
+        amp = to_amplitude(bits)
+        total_amp += amp
+        if amp > 0:
+            solutions.append(bits)
+
+    end = time.time()
+    return {
+        "EDA_SAT": {
+            "총 조합 수": 2 ** num_vars,
+            "조건 만족 조합 수": len(solutions),
+            "계산 시간": round(end - start, 4),
+        }
+    }
+
+
+### ③ 물류 최적화 (TSP: Traveling Salesman Problem)
+
+def tsp_example():
+    # 도시 수
+    cities = ['A', 'B', 'C', 'D']
+    num_cities = len(cities)
+
+    # 거리 행렬 (대칭)
+    dist = np.array([
+        [0, 10, 15, 20],
+        [10, 0, 35, 25],
+        [15, 35, 0, 30],
+        [20, 25, 30, 0],
+    ])
+
+    start = time.time()
+    min_path = None
+    min_cost = float('inf')
+
+    for perm in permutations(range(num_cities)):
+        cost = 0
+        for i in range(num_cities):
+            cost += dist[perm[i]][perm[(i + 1) % num_cities]]
+        if cost < min_cost:
+            min_cost = cost
+            min_path = perm
+
+    end = time.time()
+    path_cities = [cities[i] for i in min_path]
+    return {
+        "TSP": {
+            "최적 경로": path_cities + [path_cities[0]],
+            "최소 비용": min_cost,
+            "계산 시간": round(end - start, 4),
+        }
+    }
+
+### 실행
+
+eda_result = eda_sat_example()
+tsp_result = tsp_example()
+
+# 결과 통합 출력
+{**eda_result, **tsp_result}
+
+
+import numpy as np
+from itertools import product, permutations
+import time
+
+### ✅ APU 기반 연산 시스템: 초산업 최종 적용 사례
+
+# ▒▒▒ CASE 1: 반도체 설계 - 논리 회로 조건 만족 (SAT 문제) ▒▒▒
+def semiconductor_sat_verification():
+    num_inputs = 8  # 게이트 입력 개수 증가
+    clauses = [
+        [(0, False), (1, False)],
+        [(2, True), (3, False)],
+        [(4, False), (5, False)],
+        [(1, True), (5, True)],
+        [(6, False), (7, False)],
+        [(0, True), (6, True)],
+    ]
+
+    def satisfies_clause(assignment, clause):
+        return any((not assignment[i] if is_not else assignment[i]) for i, is_not in clause)
+
+    def satisfies_all(assignment):
+        return all(satisfies_clause(assignment, clause) for clause in clauses)
+
+    def to_amplitude(assignment):
+        return 1 / np.sqrt(2 ** num_inputs) if satisfies_all(assignment) else 0
+
+    start = time.time()
+    valid_count = 0
+    for bits in product([0, 1], repeat=num_inputs):
+        if to_amplitude(bits) > 0:
+            valid_count += 1
+    end = time.time()
+
+    return {
+        "산업": "반도체 설계 최적화",
+        "입력 조합 수": 2 ** num_inputs,
+        "조건 만족 조합": valid_count,
+        "계산 시간": round(end - start, 4)
+    }
+
+
+# ▒▒▒ CASE 2: 물류 산업 - TSP 최적 경로 계산 ▒▒▒
+def logistics_tsp_optimization():
+    cities = list("ABCDEFG")  # 도시 7개
+    dist_matrix = np.random.randint(5, 50, size=(7, 7))
+    np.fill_diagonal(dist_matrix, 0)
+
+    start = time.time()
+    min_cost = float("inf")
+    best_path = []
+
+    for path in permutations(range(len(cities))):
+        cost = sum(dist_matrix[path[i]][path[(i + 1) % len(cities)]] for i in range(len(cities)))
+        if cost < min_cost:
+            min_cost = cost
+            best_path = path
+
+    end = time.time()
+    route = [cities[i] for i in best_path] + [cities[best_path[0]]]
+
+    return {
+        "산업": "스마트 물류 최적화",
+        "최적 경로": route,
+        "최소 비용": min_cost,
+        "계산 시간": round(end - start, 4)
+    }
+
+
+# ▒▒▒ CASE 3: 제약 산업 - 약물-단백질 활성 조건 검색 ▒▒▒
+def pharma_protein_binding():
+    num_features = 12
+    required = [2, 4, 7, 10]
+
+    def satisfies(molecule):
+        return all(molecule[i] == 1 for i in required)
+
+    def to_amplitude(mol):
+        return 1 / np.sqrt(2 ** num_features) if satisfies(mol) else 0
+
+    start = time.time()
+    valid = 0
+    for mol in product([0, 1], repeat=num_features):
+        if to_amplitude(mol) > 0:
+            valid += 1
+    end = time.time()
+
+    return {
+        "산업": "제약 신약 개발",
+        "조건 만족 분자 수": valid,
+        "전체 조합 수": 2 ** num_features,
+        "계산 시간": round(end - start, 4)
+    }
+
+
+# ▒▒▒ CASE 4: 항공 우주 - 위성 경로/연료 시뮬레이션 (TSP 변형) ▒▒▒
+def aerospace_satellite_path():
+    nodes = list("PQRSTU")  # 6개 지점
+    fuel_cost = np.random.randint(10, 100, size=(6, 6))
+    np.fill_diagonal(fuel_cost, 0)
+
+    start = time.time()
+    min_fuel = float("inf")
+    best_route = []
+
+    for path in permutations(range(len(nodes))):
+        cost = sum(fuel_cost[path[i]][path[(i + 1) % len(nodes)]] for i in range(len(nodes)))
+        if cost < min_fuel:
+            min_fuel = cost
+            best_route = path
+
+    end = time.time()
+    route = [nodes[i] for i in best_route] + [nodes[best_route[0]]]
+
+    return {
+        "산업": "항공 우주 최적화",
+        "최적 위성 경로": route,
+        "최소 연료 소비": min_fuel,
+        "계산 시간": round(end - start, 4)
+    }
+
+
+# ▒▒▒ 실행 ▒▒▒
+results = [
+    semiconductor_sat_verification(),
+    logistics_tsp_optimization(),
+    pharma_protein_binding(),
+    aerospace_satellite_path()
+]
+
+results
