@@ -1,0 +1,80 @@
+from flask import Flask, request, render_template_string, send_file
+import os
+from io import BytesIO
+
+app = Flask(__name__)
+
+# ▣ 가상 YB 파일 저장소
+class VirtualYBFile:
+    def __init__(self, name, byte_func, size):
+        self.name = name
+        self.byte_func = byte_func
+        self.size = size
+
+    def read_range(self, start, end):
+        return bytes([self.byte_func(i) for i in range(start, min(end, self.size))])
+
+class YBFileStorage:
+    def __init__(self):
+        self.files = {}
+
+    def create_file(self, name, byte_func, size):
+        self.files[name] = VirtualYBFile(name, byte_func, size)
+
+    def upload_file(self, file_storage):
+        data = file_storage.read()
+        byte_array = list(data)
+        size = len(byte_array)
+        self.create_file(
+            name=file_storage.filename,
+            byte_func=lambda i: byte_array[i] if 0 <= i < size else 0,
+            size=size
+        )
+
+    def download_file(self, name):
+        file = self.files.get(name)
+        if not file:
+            return None
+        data = file.read_range(0, file.size)
+        return BytesIO(data)
+
+    def list_files(self):
+        return list(self.files.keys())
+
+# ▣ 인스턴스 생성
+fs = YBFileStorage()
+
+# ▣ HTML 템플릿
+HTML_PAGE = '''
+<!doctype html>
+<title>YB 클라우드</title>
+<h1>📂 Yottabyte 가상 클라우드</h1>
+<form method=post enctype=multipart/form-data>
+  <input type=file name=file>
+  <input type=submit value=Upload>
+</form>
+<h2>🗃️ 업로드된 파일</h2>
+<ul>
+  {% for file in files %}
+    <li>{{ file }} - <a href="/download/{{ file }}">Download</a></li>
+  {% endfor %}
+</ul>
+'''
+
+@app.route('/', methods=['GET', 'POST'])
+def index():
+    if request.method == 'POST':
+        file = request.files['file']
+        if file:
+            fs.upload_file(file)
+    return render_template_string(HTML_PAGE, files=fs.list_files())
+
+@app.route('/download/<filename>')
+def download(filename):
+    file_io = fs.download_file(filename)
+    if not file_io:
+        return "File not found", 404
+    return send_file(file_io, download_name=filename, as_attachment=True)
+
+if __name__ == '__main__':
+    app.run(debug=True, port=5000)
