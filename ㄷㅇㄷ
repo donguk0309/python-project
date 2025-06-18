@@ -1,0 +1,40 @@
+import time
+import numpy as np
+
+def apu_zeta(s, epsilon=1e-20):
+    result = 0.0
+    n = 1
+    while True:
+        term = 1 / (n ** s)
+        if term < epsilon:
+            break
+        result += term
+        n += 1
+    return result, n
+
+start = time.time()
+s = 1000
+zeta_val, terms_used = apu_zeta(s)
+end = time.time()
+
+print(f"🎯 APU ζ({s}) = {zeta_val}")
+print(f"⏱ 사용된 항: {terms_used}")
+print(f"⚡ APU 연산 시간: {end - start:.8f}초")
+
+
+import time
+
+def apu_cubic_sum(n):
+    # 정수론 공식: (n(n+1)/2)^2
+    return ((n * (n + 1)) // 2) ** 2
+
+# 1부터 1조까지
+n = 1_000_000_000_000
+
+start = time.time()
+cubic_sum = apu_cubic_sum(n)
+end = time.time()
+
+print(f"✅ APU 기반 정수론 (3제곱 합): 1부터 {n:,}까지의 i^3의 합")
+print(f" - 결과: {cubic_sum}")
+print(f"⏱ 계산 시간: {end - start:.8f}초")
